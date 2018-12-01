@@ -15,11 +15,12 @@ client = socket.socket(socket.AF_INET, socket.SOCK_DGRAM) #создаем udp к
 
 def OnPress(key):
     """обработка событитя нажатия кнопки"""
-    global case
-    key = str(key)
-    if key not in keys:
+    global keys
+    global cmd
+    if str(key) not in keys:
         keys.append(key)
-    #sendCommand(key)
+    if key == keyboard.Key.esc:
+        cmd = "EXIT"
     
 def OnRelease(key):
     """обработка событитя отпускания кнопки"""
@@ -27,7 +28,6 @@ def OnRelease(key):
     if str(key) in keys:
         keys.remove(str(key))
     if key == keyboard.Key.esc:
-        sendCommand(key)
         return False
         
 def sendCommand(cmd):
@@ -49,8 +49,11 @@ keyListenerThread.start()
 running = True
 direction = None
 power = 80
+cmd = None
 
 while running:
+    print(keys)
+    
     if keys: #если список нажатых кнопок не пуст, то проверяем его на наличие знакомых комбинаций
         if "'w'" in keys and "'d'" in keys:
             direction = "forward and right"
@@ -75,12 +78,15 @@ while running:
             power -= 10
         if power < 100 and"'+'" in keys:
             power += 10
+
+        if "Key.space" in keys:
+            cmd = "beep" 
+
     else:
         direction = None
-    """data = []
-    data.append(direction)
-    data.append(power)"""
-    sendCommand((direction, power))
+    print(cmd)
+    sendCommand((direction, power, cmd))
+    cmd = None
     time.sleep(0.05)
 client.close()
 print("stop")

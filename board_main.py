@@ -9,14 +9,13 @@ import time
 sys.path.append("EduBot/EduBotLibrary")
 import edubot
 
-
 #IP = "127.0.0.1"
 IP = str(os.popen("hostname -I | cut -d\" \" -f1").readline().replace("\n",""))
 PORT = 8000
 TIMEOUT = 120 #время ожидания приема сообщения
 
 MAX_POWER = 255
-KOOF = 0.75
+KOOF = 0
 
 def motorRun(leftSpeed, rightSpeed):
     robot.leftMotor.SetSpeed(leftSpeed)
@@ -27,6 +26,7 @@ def beep():
     robot.Beep()
     
 def Exit():
+    global running
     print("exit")
     running = False
     
@@ -56,7 +56,7 @@ while running:
         print("Time is out...")
         break
 
-    direction, power = pickle.loads(data[0])
+    direction, power, cmd = pickle.loads(data[0])
     adrs = data[1]
     power = val_map(power, 0, 100, 0, MAX_POWER)
     print(direction, power)
@@ -96,16 +96,12 @@ while running:
         
     motorRun(leftSpeed, rightSpeed)
     
-    """
     if(cmd == "beep"):
         beep()
-    if cmd == "exit":
+    if cmd == "EXIT":
         Exit()
-    else:
-        print("Unknown command: %s" % cmd)
-    """
+
     time.sleep(0.05)
-    
 motorRun(0, 0)
 robot.Release()
 server.close()
