@@ -81,7 +81,7 @@ while running:
     data.append(direction)
     data.append(power)"""
     sendCommand((direction, power))
-    time.sleep(0.1)
+    time.sleep(0.05)
 client.close()
 print("stop")
 
