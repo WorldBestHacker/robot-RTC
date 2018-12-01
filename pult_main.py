@@ -70,13 +70,17 @@ while running:
             direction = "left"
         else:
             direction = None
-            
+    
         if power > 0 and "'-'" in keys:
             power -= 10
         if power < 100 and"'+'" in keys:
             power += 10
-        
-    sendCommand(direction, power)
+    else:
+        direction = None
+    """data = []
+    data.append(direction)
+    data.append(power)"""
+    sendCommand((direction, power))
     time.sleep(0.1)
 client.close()
 print("stop")
