@@ -7,7 +7,7 @@ import pickle #библиотека для "упаковывания данны�
 import time 
 import threading
 
-IP = "192.168.0.102" # IP сервера, куда мы посылаем данные о нажатиях клавиатуры
+IP = "192.168.0.103" # IP сервера, куда мы посылаем данные о нажатиях клавиатуры
 PORT = 8000 # порт, по которому мы отсылаем данные
 keys = [] # список нажатых кнопок на клавиатуре
 
@@ -18,17 +18,19 @@ def OnPress(key):
     global keys
     global cmd
     if str(key) not in keys:
-        keys.append(key)
+        keys.append(str(key))
     if key == keyboard.Key.esc:
         cmd = "EXIT"
+    
     
 def OnRelease(key):
     """обработка событитя отпускания кнопки"""
     global keys
-    if str(key) in keys:
-        keys.remove(str(key))
     if key == keyboard.Key.esc:
         return False
+    if str(key) in keys:
+        keys.remove(str(key))
+    
         
 def sendCommand(cmd):
     msg = pickle.dumps(cmd)
@@ -81,7 +83,6 @@ while running:
 
         if "Key.space" in keys:
             cmd = "beep" 
-
     else:
         direction = None
     print(cmd)
