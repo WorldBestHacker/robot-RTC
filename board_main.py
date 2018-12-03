@@ -6,6 +6,7 @@ import pickle
 import os
 import sys
 import time
+import crc16
 sys.path.append("EduBot/EduBotLibrary")
 import edubot
 
@@ -48,24 +49,27 @@ direction = None
 power = 0
 leftSpeed = 0
 rightSpeed = 0
-
+cmd = []
 while running:
     try:
         data = server.recvfrom(1024) #пытаемся получить данные
     except socket.timeout: #если вышло время, то выходим из цикла
         print("Time is out...")
         break
-
-    direction, power, cmd = pickle.loads(data[0])
+    msg, crc = pickle.loads(data[0])
+    cmd = pickle.loads(msg)
+    crc_new = crc16.crc16xmodem(msg)
+    if crc == crc_new:
+        direction, power, command = cmd
+        power = val_map(power, 0, 100, 0, MAX_POWER)
+        print("data recieved")
     adrs = data[1]
-    power = val_map(power, 0, 100, 0, MAX_POWER)
     print(direction, power)
     
-    """
     if data:
         msg = "message recieved"
         server.sendto(msg.encode("utf-8"), adrs) #отправляем ответ (msg)
-    """
+    
     if direction == None:
         leftSpeed = 0
         rightSpeed = 0
@@ -96,9 +100,9 @@ while running:
         
     motorRun(leftSpeed, rightSpeed)
     
-    if(cmd == "beep"):
+    if command == "beep":
         beep()
-    if cmd == "EXIT":
+    if command == "EXIT":
         Exit()
 
     time.sleep(0.05)

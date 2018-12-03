@@ -6,8 +6,9 @@ import socket #библиотека для связи через udp
 import pickle #библиотека для "упаковывания данных"
 import time 
 import threading
+import crc16
 
-IP = "192.168.0.103" # IP сервера, куда мы посылаем данные о нажатиях клавиатуры
+IP = "192.168.8.163" # IP сервера, куда мы посылаем данные о нажатиях клавиатуры
 PORT = 8000 # порт, по которому мы отсылаем данные
 keys = [] # список нажатых кнопок на клавиатуре
 
@@ -33,9 +34,11 @@ def OnRelease(key):
     
         
 def sendCommand(cmd):
-    msg = pickle.dumps(cmd)
+    cmd = pickle.dumps(cmd)
+    crc = crc16.crc16xmodem(cmd)
+    msg = pickle.dumps((cmd, crc))
     client.sendto(msg, (IP, PORT))
-    print(cmd)
+    #print(cmd)
 
 def Listener():
     global running
