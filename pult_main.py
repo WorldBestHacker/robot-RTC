@@ -23,7 +23,6 @@ def OnPress(key):
     if key == keyboard.Key.esc:
         cmd = "EXIT"
     
-    
 def OnRelease(key):
     """обработка событитя отпускания кнопки"""
     global keys
@@ -31,14 +30,14 @@ def OnRelease(key):
         return False
     if str(key) in keys:
         keys.remove(str(key))
-    
-        
+       
 def sendCommand(cmd):
+    """отправляем данные на сервер и высчитываем контрольную сумму для
+    проверки целостности данных"""
     cmd = pickle.dumps(cmd)
     crc = crc16.crc16xmodem(cmd)
     msg = pickle.dumps((cmd, crc))
     client.sendto(msg, (IP, PORT))
-    #print(cmd)
 
 def Listener():
     global running
@@ -52,13 +51,12 @@ keyListenerThread = threading.Thread(target = Listener)
 keyListenerThread.start()    
 
 running = True
-direction = None
-power = 80
-cmd = None
+direction = None #направление движения робота
+power = 80 # мощность (в процентах, не больше 100)
+cmd = None #команда, которую мы отправляем роботу
 
 while running:
     print(keys)
-    
     if keys: #если список нажатых кнопок не пуст, то проверяем его на наличие знакомых комбинаций
         if "'w'" in keys and "'d'" in keys:
             direction = "forward and right"
@@ -89,9 +87,9 @@ while running:
     else:
         direction = None
     print(cmd)
-    sendCommand((direction, power, cmd))
+    sendCommand((direction, power, cmd)) #отправляем на робота данные
     cmd = None
     time.sleep(0.05)
-client.close()
-print("stop")
+client.close() #закрываем udp клиент
+print("End program")
 
