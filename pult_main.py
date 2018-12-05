@@ -8,7 +8,7 @@ import time
 import threading
 import crc16
 
-IP = "192.168.8.163" # IP сервера, куда мы посылаем данные о нажатиях клавиатуры
+IP = "192.168.0.103" # IP сервера, куда мы посылаем данные о нажатиях клавиатуры
 PORT = 8000 # порт, по которому мы отсылаем данные
 keys = [] # список нажатых кнопок на клавиатуре
 
@@ -38,7 +38,8 @@ def sendCommand(cmd):
     crc = crc16.crc16xmodem(cmd)
     msg = pickle.dumps((cmd, crc))
     client.sendto(msg, (IP, PORT))
-
+    
+        
 def Listener():
     global running
     listener = keyboard.Listener(on_press = OnPress, on_release = OnRelease)
@@ -86,10 +87,15 @@ while running:
             cmd = "beep" 
     else:
         direction = None
-    print(cmd)
+    print(direction, power, cmd)
     sendCommand((direction, power, cmd)) #отправляем на робота данные
     cmd = None
     time.sleep(0.05)
+"""
+    reply = client.recvfrom(1024) #принимаем ответ от сервера
+    print(reply) #выводим сообщение
+"""
+    
 client.close() #закрываем udp клиент
 print("End program")
 
