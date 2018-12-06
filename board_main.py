@@ -12,6 +12,7 @@ import time
 import crc16
 sys.path.append("EduBot/EduBotLibrary")
 import edubot
+import threading
 
 #IP = "127.0.0.1"
 IP = str(os.popen("hostname -I | cut -d\" \" -f1").readline().replace("\n",""))
@@ -30,7 +31,7 @@ MAX_EXPECTED_AMPS = 2.0
 old_data = None
 
 #все данные, которые должны быть выведены на экран (название и место для значения)
-all_data = [["направление", "мощность", "команды"], [[], [], []]] 
+all_data = [["направление", "мощность", "команды", "напряжение", "ток"], [[], [], [], [], []]] 
 
     
 def motorRun(leftSpeed, rightSpeed):
@@ -117,7 +118,7 @@ def main():
     if command == "EXIT":
         Exit()
         
-    print_data()
+    #print_data()
     """
     msg = "data recieved"
     server.sendto(msg.encode("utf-8"), (adrs, PORT)) #отправляем ответ (msg)
@@ -133,19 +134,24 @@ def Exit():
     robot.Release() #прекращаем работу с роботом
     server.close() #закрываем udp сервер
     print("End program")
-     
+def update_current():
+    global all_data
+    all_data[1][3] = round(ina.voltage(), 2)
+    all_data[1][4] = round(ina.current() / 1000, 3)
+    
 def print_data():
     """выводим на экран все важные данные
     (направление, мощность, команды, а также характеристики тока)"""
-    os.system('clear')#очищаем терминал
-    for i in range(len(all_data[0])):
-        print(all_data[0][i], " : ", all_data[1][i]) #выводим все данные из all_data
-        
-    print("\nBus Voltage: %.3f V" % ina.voltage())
-    print("Bus Current: %.3f mA" % ina.current())
-    print("Power: %.3f mW" % ina.power())
+    global running
+    update_current()
+    while running:
+        os.system('clear')#очищаем терминал
+        for i in range(len(all_data[0])):
+            print(all_data[0][i], " : ", all_data[1][i]) #выводим все данные из all_data
+        time.sleep(0.1)
     #выводим характеристики питания
-    
+
+data_monitor = threading.Thread(target = print_data)
 #создаем обект для работы с INA219
 ina = INA219(SHUNT_OHMS, MAX_EXPECTED_AMPS) 
 ina.configure(ina.RANGE_16V)
@@ -165,7 +171,9 @@ direction = DEF_DIR
 power = DEF_POW
 command = DEF_CMD
 
+data_monitor.start()
 while running:
     main()
+    update_current()
     time.sleep(0.1)
-    
+
