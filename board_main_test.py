@@ -12,13 +12,15 @@ import time
 import crc16
 sys.path.append("EduBot/EduBotLibrary")
 import edubot
+import threading
 
 #IP = "127.0.0.1"
 IP = str(os.popen("hostname -I | cut -d\" \" -f1").readline().replace("\n",""))
+USER_IP = ""
 PORT = 8000
 TIMEOUT = 120 #время ожидания приема сообщения
 
-MAX_POWER = 255
+MAX_POWER = 200
 KOOF = 0 
 
 DEF_DIR = None
@@ -29,10 +31,11 @@ SHUNT_OHMS = 0.01 #значение сопротивления шунта на �
 MAX_EXPECTED_AMPS = 2.0
 old_data = None
 
-#все данные, которые должны быть выведены на экран (название и место для значения)
-all_data = [["направление", "мощность", "команды"], [[], [], []]] 
+first_cicle = True 
 
-    
+#все данные, которые должны быть выведены на экран (название и место для значения)
+all_data = [["направление", "мощность", "команды", "напряжение", "ток"], [[], [], [], [], []]] 
+
 def motorRun(leftSpeed, rightSpeed):
     """запускает моторы с заданной мощностью (от 255 до -255)"""
     robot.leftMotor.SetSpeed(leftSpeed)
@@ -41,13 +44,16 @@ def motorRun(leftSpeed, rightSpeed):
 def recv_data():
     global running
     global old_data
-    global adrs
+    global USER_IP
+    global first_cicle
+    
     data = []
     try:
         data = server.recvfrom(1024) #пытаемся получить данные
-        adrs = data[1]
-        #print(adrs[0])
-        if data != old_data:
+        if first_cicle: #если первая иттерация, то записываем IP первого устройства, приславшего пакет с данными
+            USER_IP = data[1][0]
+            first_cicle = False
+        if data != old_data: #если пакет данных "устарел", то игнорируем
             old_data = data
             return data
         else:
@@ -59,16 +65,55 @@ def recv_data():
 def val_map(val, fromLow, fromHigh, toLow, toHigh):
     return int(toLow + (toHigh - toLow) * ((val - fromLow) / (fromHigh - fromLow)))
 
+def Exit():
+    """окончание работы"""
+    global running
+    print("exit")
+    running = False
+    motorRun(0, 0) #отсанавливаем двигатели
+    robot.Beep() #сигнализируем о том, что программа завершена
+    robot.Release() #прекращаем работу с роботом
+    server.close() #закрываем udp сервер
+    
+def update_current():
+    """обновляем характеристики питании и записываем в список параметров"""
+    global all_data
+    all_data[1][3] = round(ina.voltage(), 2)
+    all_data[1][4] = round(ina.current() / 1000, 3)
+    
+def print_data():
+    """выводим на экран все важные данные из списка параметров"""
+    global running
+    update_current()
+    while running:
+        os.system('clear')#очищаем терминал
+        for i in range(len(all_data[0])):
+            print(all_data[0][i], " : ", all_data[1][i]) #выводим все данные из all_data
+        time.sleep(0.1)
+    #выводим характеристики питания
+        
+    send_reply(all_data)#отправляем параметры на пульт
+    
+def send_reply(data):
+    """отправляем список параметров на пульт"""
+    global USER_IP
+    data = pickle.dumps(data)
+    crc = crc16.crc16xmodem(data)
+    msg = pickle.dumps((data, crc))
+    server.sendto(msg, (USER_IP, PORT))
+
 def main():
     """основной цикл программы"""
     global direction
     global power
     global command
-    global all_data 
+    global all_data
+    global first_cicle
+    global USER_IP
+
     leftSpeed = 0 #скорость левого двигателя
     rightSpeed = 0 #скорость правого двигателя
     cmd = [] #список всех команд, отправляемых роботу
-    data = []
     data = recv_data()
 
     if data:
@@ -80,8 +125,7 @@ def main():
             all_data[1][0] = direction
             all_data[1][1] = power
             all_data[1][2] = command
-            power = val_map(power, 0, 100, 0, MAX_POWER) 
-        
+            power = val_map(power, 0, 100, 0, MAX_POWER)
     if direction == None:
         leftSpeed = 0
         rightSpeed = 0
@@ -116,36 +160,10 @@ def main():
         robot.Beep()
     if command == "EXIT":
         Exit()
-        
-    print_data()
-    """
-    msg = "data recieved"
-    server.sendto(msg.encode("utf-8"), (adrs, PORT)) #отправляем ответ (msg)
-    print("reply transmitted IP - ", (adrs, PORT))
-    """
-def Exit():
-    """окончание работы"""
-    global running
-    print("exit")
-    running = False
-    motorRun(0, 0) #отсанавливаем двигатели
-    robot.Beep() #сигнализируем о том, что программа завершена
-    robot.Release() #прекращаем работу с роботом
-    server.close() #закрываем udp сервер
-    print("End program")
-     
-def print_data():
-    """выводим на экран все важные данные
-    (направление, мощность, команды, а также характеристики тока)"""
-    os.system('clear')#очищаем терминал
-    for i in range(len(all_data[0])):
-        print(all_data[0][i], " : ", all_data[1][i]) #выводим все данные из all_data
-        
-    print("\nBus Voltage: %.3f V" % ina.voltage())
-    print("Bus Current: %.3f mA" % ina.current())
-    print("Power: %.3f mW" % ina.power())
-    #выводим характеристики питания
     
+    send_reply(all_data)
+
+data_monitor = threading.Thread(target = print_data)#создаем поток для данных отладки
 #создаем обект для работы с INA219
 ina = INA219(SHUNT_OHMS, MAX_EXPECTED_AMPS) 
 ina.configure(ina.RANGE_16V)
@@ -165,7 +183,12 @@ direction = DEF_DIR
 power = DEF_POW
 command = DEF_CMD
 
+data_monitor.start()#запускаем монитор для отладки
 while running:
-    main()
-    time.sleep(0.1)
-    
+    try:
+        main()
+        update_current()
+        time.sleep(0.1)
+    except (KeyboardInterrupt, SystemExit):
+        print("KeyboardInterrupt")
+print("End program")
