@@ -4,7 +4,8 @@
 import time
 import receiver
 
-IP_ROBOT = '192.168.8.154'
+#IP_ROBOT = "127.0.0.1"
+IP_ROBOT = "192.168.8.154"
 RTP_PORT = 5000
 
 recv = receiver.StreamReceiver(receiver.FORMAT_MJPEG, (IP_ROBOT, RTP_PORT))
