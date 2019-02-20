@@ -7,7 +7,7 @@ import os
 #библиотеки для работы с сервером
 import socket
 import pickle
-sys.path.append('/home/robot-RTC/RPicam-Streamer')
+sys.path.append('/home/alexey/robot-RTC/RPicam-Streamer')
 import time
 import receiver
 import threading
