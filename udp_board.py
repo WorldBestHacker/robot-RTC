@@ -41,8 +41,7 @@ USER_IP = '' #IP пульта (IP приемника видео)
 RTP_PORT = 5000 #порт отправки RTP видео
 TIMEOUT = 120 #время ожидания приема сообщения
 
-FORMAT = rpicam.VIDEO_MJPEG #поток MJPEG
-WIDTH, HEIGHT = 320, 240
+WIDTH, HEIGHT = 100, 50
 RESOLUTION = (WIDTH, HEIGHT)
 FRAMERATE = 30
 
@@ -53,32 +52,10 @@ DEF_DIR = None
 DEF_POW = 0
 DEF_CMD = None #параметры, которые будут выставлены при запуске программы
 
-old_data = None 
-
-first_cicle = True
-
 SHUNT_OHMS = 0.01 #значение сопротивления шунта на плате EduBot
 MAX_EXPECTED_AMPS = 2.0
 ina = INA219(SHUNT_OHMS, MAX_EXPECTED_AMPS) 
 ina.configure(ina.RANGE_16V)
-
-disp = Adafruit_SSD1306.SSD1306_128_64(rst = None) #создаем обект для работы c OLED дисплеем 128х64
-disp.begin() #инициализируем дисплей
-disp.clear() #очищаем дисплей
-disp.display() #обновляем дисплей
-
-robot = edubot.EduBot(1)#объявляем робота
-assert robot.Check(), 'EduBot not found!!!' #проверяем, подключена ли плата EduBot
-robot.Start() #обязательная процедура, запуск потока отправляющего на контроллер EduBot онлайн сообщений
-print ('EduBot started!!!')
-
-server = socket.socket(socket.AF_INET, socket.SOCK_DGRAM) #создаем сервер
-server.bind((IP, PORT)) #запускаем сервер
-print("Listening %s on port %d..." % (IP, PORT))
-server.settimeout(TIMEOUT) #указываем серверу время ожидания приема сообщения
-
-#все данные, которые должны быть выведены на экран (название и место для значения)
-all_data = [["направление", "мощность", "команды", "напряжение", "ток"], [[], [], [], [], []]] 
 
 class StateThread(threading.Thread):
     def __init__(self, robot, ina219, disp):
@@ -163,6 +140,7 @@ def transmit():
     global frameHandlerThread
     global USER_IP
     global RTP_PORT
+    global rpiCamStreamer
     print('Start transmit...')
     #проверка наличия камеры в системе  
     assert rpicam.checkCamera(), 'Raspberry Pi camera not found'
@@ -170,9 +148,6 @@ def transmit():
     print('OpenCV version: %s' % cv2.__version__)
 
     FORMAT = rpicam.VIDEO_MJPEG #поток MJPEG
-    WIDTH, HEIGHT = 320, 240
-    RESOLUTION = (WIDTH, HEIGHT)
-    FRAMERATE = 30
 
     rpiCamStreamer = rpicam.RPiCamStreamer(FORMAT, RESOLUTION, FRAMERATE)
     rpiCamStreamer.setPort(RTP_PORT)
@@ -203,11 +178,13 @@ def recv_data():
             print("робот захвачен", USER_IP)
             transmit()
             first_cicle = False
+        return data
+        """
         if data != old_data and data[1][0] == USER_IP: #если пакет данных "устарел", то игнорируем
             old_data = data
             return data
         else:
-            return None
+            return None"""
     except socket.timeout: #если вышло время, то выходим из цикла
         running = False
         print("Time is out...")
@@ -218,17 +195,24 @@ def val_map(val, fromLow, fromHigh, toLow, toHigh):
 def Exit():
     """окончание работы"""
     global frameHandlerThread
+    global rpiCamStreamer
     global running
     global transmit
     running = False
-    SetSpeed(0,0)
+    motorRun(0,0)
     robot.Release()
     server.close()
     #останавливаем обработку кадров
     frameHandlerThread.stop()
+    print("framehandler has been stopped")
     #останов трансляции c камеры
-    rpiCamStreamer.stop()    
+    rpiCamStreamer.stop()
+    print("rpicam streamer has been stopped")
     rpiCamStreamer.close()
+    robot.Release()
+    print("EduBot has been released")
+    server.close()
+    
     print('End program')
 
 """    
@@ -258,14 +242,16 @@ def servo_run(num, pos):
     
 def main():
     """основной цикл программы"""
-    global direction
-    global power
-    global command
-    global servo
+    global running
 
+    direction = ""
+    power = 0
+    command = []
+    servo = []
     leftSpeed = 0 #скорость левого двигателя
     rightSpeed = 0 #скорость правого двигателя
     cmd = [] #список всех команд, отправляемых роботу
+    
     data = recv_data()
     
     if data:
@@ -284,10 +270,7 @@ def main():
             if servo[3]:
                 servo_run(3, servo[3])
             """
-            all_data[1][0] = direction
-            all_data[1][1] = power
-            all_data[1][2] = command
-            #all_data[1][5] = servo
+
             if "BOOST" in command:
                 power = 255
             else:
@@ -326,18 +309,35 @@ def main():
     if "BEEP" in command:
         robot.Beep()
     if "EXIT" in command:
-        Exit()
+        running = False
+        print("the program has been stopped by ", USER_IP)
     time.sleep(0.1)
+
+disp = Adafruit_SSD1306.SSD1306_128_64(rst = None) #создаем обект для работы c OLED дисплеем 128х64
+disp.begin() #инициализируем дисплей
+disp.clear() #очищаем дисплей
+disp.display() #обновляем дисплей
+
+robot = edubot.EduBot(1)#объявляем робота
+assert robot.Check(), 'EduBot not found!!!' #проверяем, подключена ли плата EduBot
+robot.Start() #обязательная процедура, запуск потока отправляющего на контроллер EduBot онлайн сообщений
+print ('EduBot started!!!')
+
+server = socket.socket(socket.AF_INET, socket.SOCK_DGRAM) #создаем сервер
+server.bind((IP, PORT)) #запускаем сервер
+print("Listening %s on port %d..." % (IP, PORT))
+server.settimeout(TIMEOUT) #указываем серверу время ожидания приема сообщения
+
+#все данные, которые должны быть выведены на экран (название и место для значения)
+all_data = [["направление", "мощность", "команды", "напряжение", "ток"], [[], [], [], [], []]] 
+old_data = None 
+first_cicle = True
 running = True
-direction = ""
-power = 0
-command = []
-servo = []
 
 while running:
     try:
         main()
     except (KeyboardInterrupt, SystemExit):
-        Exit()
+        break
         print("KeyboardInterrupt")
-print("End program")
+Exit()
