@@ -13,11 +13,14 @@ import receiver
 import threading
 import crc16
 
-IP = '192.168.0.103'
+IP_ROBOT = '192.168.0.103'
+IP = str(os.popen("hostname -I | cut -d\" \" -f1").readline().replace("\n",""))
 PORT = 8000
+PORT_REPLY = 9000
 RTP_PORT = 5000
 FPS = 24
-
+TIMEOUT = 120
+        
 def onFrameCallback(data, width, height):
     frame = pygame.image.frombuffer(data, (width, height), 'RGB')
     screen.blit(frame, (0,0))
@@ -28,21 +31,32 @@ def sendCommand(data):
     global old_crc
     
     if not running:#если программа пульта остановлена, то отправляем на робота соответствующую команду
-        data[3].append("EXIT")
+        data[2].append("EXIT")
     data = pickle.dumps(data)#запаковываем данные
     crc = crc16.crc16xmodem(data)#вычисляем контрольную сумму пакета
     msg = pickle.dumps((data, crc))#прикрепляем вычисленную контрольную сумму к пакету данных
     if crc != old_crc:#если есть изменения параметров, то отправляем на робота
-        client.sendto(msg, (IP, PORT))
+        client.sendto(msg, (IP_ROBOT, PORT))
         old_crc = crc
-        print(keys, direction, power, cmd, servo)
+        #print(keys, direction, power, cmd, auto_mode)
     
 def recv_reply():
-    reply = client.recvfrom(1024) #принимаем ответ от сервера
-    print("Reply: %s", reply) #выводим сообщение
-    return reply
-    
+    """обратная связь с роботом"""
+    global running
+    print("start recieving")
+    while running:
+        try:
+            data = server.recvfrom(1024)
+            reply, crc = pickle.loads(data[0])
+            reply = pickle.loads(reply)
+            print(reply) #выводим сообщение
+            time.sleep(0.1)
+        except socket.timeout:
+            running = False
+            print("Time is out...")
+        
 def Exit():
+    """завершение проограммы, остановка всех потоков"""
     client.close() #закрываем udp клиент
     print("End program")
     recv.stop_pipeline()
@@ -51,17 +65,22 @@ def Exit():
 
 client = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
 
+server = socket.socket(socket.AF_INET, socket.SOCK_DGRAM) #создаем сервер
+server.bind((IP, PORT_REPLY)) #запускаем сервер
+server.settimeout(TIMEOUT) #указываем серверу время ожидания приема сообщения
+
 pygame.init() #инициализация Pygame
 pygame.mixer.quit()
 
-screen = pygame.display.set_mode([320, 240]) #создаем окно программы
+screen = pygame.display.set_mode([640, 480]) #создаем окно программы
 clock = pygame.time.Clock() #для осуществления задержки
 pygame.joystick.init() #инициализация библиотеки джойстика
 
 recv = receiver.StreamReceiver(receiver.VIDEO_MJPEG, onFrameCallback)
-recv.setHost(IP)
+recv.setHost(IP_ROBOT)
 recv.setPort(RTP_PORT)
 recv.play_pipeline()
+
 
 keys = []
 power = 100
@@ -70,16 +89,22 @@ running = True
 old_crc = None
 command = []
 direction = [0,0]
+cmd = []
+auto_mode = None
+reply = ""
 
+reply_thread = threading.Thread(target = recv_reply)
+reply_thread.start()
+
+"""
 try:
     joy = pygame.joystick.Joystick(0) # создаем объект джойстик
     joy.init() # инициализируем джойстик
     print('Enabled joystick: ' + joy.get_name())
 except pygame.error:
-    print('no joystick found.')
+    print('no joystick found.')"""
 
 while running:
-    cmd = ""
     for event in pygame.event.get():#пробегаемся по всем событиям pygame
         if event.type == pygame.QUIT:#если пользователь завкрывает окно pygame останавливаем программу 
             running = False
@@ -100,7 +125,25 @@ while running:
                 cmd.append("BOOST")
             if event.key == pygame.K_x and "BEEP" not in cmd:
                 cmd.append("BEEP")
-                    
+            """включение и отключение различных редимов автономной езды
+                при нажатии на кнопки 1-3 включается один из режимов,
+                при повторном нажатии - выключается"""
+            if event.key == pygame.K_1:
+                if auto_mode == 1:
+                    auto_mode = None
+                else:
+                    auto_mode = 1
+            if event.key == pygame.K_2:
+                if auto_mode == 2:
+                    auto_mode = None
+                else:
+                    auto_mode = 2 
+            if event.key == pygame.K_3:
+                if auto_mode == 3:
+                    auto_mode = None
+                else:
+                    auto_mode = 3 
+           
         if event.type == pygame.KEYUP:#отпускание клавиш
             if event.key == pygame.K_w:
                 keys.remove("w")
@@ -116,7 +159,6 @@ while running:
                 cmd.remove("BOOST")
             if event.key == pygame.K_x:
                 cmd.remove("BEEP")
-            
     if keys: #если список нажатых кнопок не пуст, то проверяем его на наличие знакомых комбинаций
         if "w" in keys and "d" in keys:
             direction = "forward and right"
@@ -138,8 +180,8 @@ while running:
             direction = None
     else:
         direction = None 
-    sendCommand((direction, power, cmd, servo))
-
+    sendCommand((direction, power, cmd, auto_mode))
     pygame.display.update()         
     clock.tick(FPS) #задержка обеспечивающая 30 кадров в секунду
+    
 Exit()

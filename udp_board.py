@@ -37,13 +37,16 @@ import rpicam
 #IP = "127.0.0.1"
 IP = str(os.popen("hostname -I | cut -d\" \" -f1").readline().replace("\n",""))
 PORT = 8000 #порт для управления роботом
+PORT_REPLY = 9000
 USER_IP = '' #IP пульта (IP приемника видео)
 RTP_PORT = 5000 #порт отправки RTP видео
 TIMEOUT = 120 #время ожидания приема сообщения
 
-WIDTH, HEIGHT = 100, 50
+WIDTH, HEIGHT = 640, 480
 RESOLUTION = (WIDTH, HEIGHT)
 FRAMERATE = 30
+
+DELAY = 0.1
 
 MAX_POWER = 210 #максимальная мощность для обычного режима езды
 KOOF = 0 #коэффициент для плавного поворота
@@ -67,23 +70,27 @@ class StateThread(threading.Thread):
         self._disp = disp
         
     def run(self):
+        global reply
         image = Image.new('1', (self._disp.width, self._disp.height)) #создаем ч/б картинку для отрисовки на дисплее
         draw = ImageDraw.Draw(image) #создаем объект для рисования на картинке
         font = ImageFont.load_default() #создаем шрифт для отрисовки на дисплее
         print('State thread started')
         while not self._stopped.is_set():
             # Отрисовываем на картинке черный прямоугольник, тем самым её очищая
-            draw.rectangle((0, 0, self._disp.width, self._disp.height), outline=0, fill=0)
+            draw.rectangle((0, 0, self._disp.width, self._disp.height), outline = 0, fill = 0)
             #Отрисовываем строчки текста с текущими значениями напряжения, сылы тока и мощности
-            draw.text((0, 0), "Edubot project", font=font, fill=255)
-            draw.text((0, 10), "Voltage: %.2fV" % self._ina.voltage(), font=font, fill=255)
-            draw.text((0, 20), "Current: %.2fmA" % self._ina.current(), font=font, fill=255)
-            draw.text((0, 30), "Power: %.2f" % self._ina.power(), font=font, fill=255)
+            draw.text((0, 0), "Edubot project", font = font, fill=255)
+            draw.text((0, 10), "Voltage: %.2fV" % self._ina.voltage(), font = font, fill = 255)
+            draw.text((0, 20), "Current: %.2fmA" % self._ina.current(), font = font, fill = 255)
+            draw.text((0, 30), "Power: %.2f" % self._ina.power(), font = font, fill = 255)
+
+            #отправляем на пульт данные о процессоре
+            reply.append('CPU temp: %.2f°C. CPU use: %.2f%%' % (rpicam.getCPUtemperature(), psutil.cpu_percent()))
             # Копируем картинку на дисплей
             self._disp.image(image)
             #Обновляем дисплей
             self._disp.display()
-            time.sleep(1)
+            time.sleep(DELAY)
         print('State thread stopped')
     def stop(self): #остановка потока
         self._stopped.set()
@@ -136,7 +143,7 @@ def onFrameCallback(frame): #обработчик события 'получен
     #print('New frame')
     frameHandlerThread.setFrame(frame) #задали новый кадр
 
-def transmit():
+def start_transmit():
     global frameHandlerThread
     global USER_IP
     global RTP_PORT
@@ -166,7 +173,6 @@ def motorRun(leftSpeed, rightSpeed):
     
 def recv_data():
     global running
-    global old_data
     global USER_IP
     global first_cicle
     
@@ -176,15 +182,9 @@ def recv_data():
         if first_cicle: #если первая иттерация, то записываем IP первого устройства, приславшего пакет с данными
             USER_IP = data[1][0]
             print("робот захвачен", USER_IP)
-            transmit()
+            start_transmit()
             first_cicle = False
         return data
-        """
-        if data != old_data and data[1][0] == USER_IP: #если пакет данных "устарел", то игнорируем
-            old_data = data
-            return data
-        else:
-            return None"""
     except socket.timeout: #если вышло время, то выходим из цикла
         running = False
         print("Time is out...")
@@ -196,23 +196,22 @@ def Exit():
     """окончание работы"""
     global frameHandlerThread
     global rpiCamStreamer
-    global running
-    global transmit
-    running = False
     motorRun(0,0)
-    robot.Release()
-    server.close()
+    
+    stateThread.stop()
     #останавливаем обработку кадров
-    frameHandlerThread.stop()
-    print("framehandler has been stopped")
-    #останов трансляции c камеры
-    rpiCamStreamer.stop()
-    print("rpicam streamer has been stopped")
-    rpiCamStreamer.close()
+    try:
+        frameHandlerThread.stop()
+        print("framehandler has been stopped")
+        #останов трансляции c камеры
+        rpiCamStreamer.stop()
+        print("rpicam streamer has been stopped")
+        rpiCamStreamer.close()
+    except:
+        pass
     robot.Release()
     print("EduBot has been released")
     server.close()
-    
     print('End program')
 
 """    
@@ -229,13 +228,19 @@ def print_data():
         time.sleep(0.1)
     #выводим характеристики питания
 """   
-def send_reply(data):
+def send_reply():
     """отправляем список параметров на пульт"""
     global USER_IP
-    data = pickle.dumps(data)
-    crc = crc16.crc16xmodem(data)
-    msg = pickle.dumps((data, crc))
-    server.sendto(msg, (USER_IP, PORT))
+    global reply
+    while running:
+        if reply:
+            data = pickle.dumps(reply)
+            crc = crc16.crc16xmodem(data)
+            msg = pickle.dumps((data, crc))
+            client.sendto(msg, (USER_IP, PORT_REPLY))
+            print("reply sended", reply)
+            time.sleep(0.1)
+            reply = []
     
 def servo_run(num, pos):
     robot.servo[num].SetPosition(pos)
@@ -243,39 +248,31 @@ def servo_run(num, pos):
 def main():
     """основной цикл программы"""
     global running
-
-    direction = ""
-    power = 0
-    command = []
-    servo = []
+    global auto_mode #переключатель режимов автономной езды
+    global reply #список данных, отправляемы обратно на пульт
+    direction = "" #направление движения
+    power = 0 #мощность двигателей 
+    command = [] #особые команды роботу (сигнал, остановка программы)
     leftSpeed = 0 #скорость левого двигателя
     rightSpeed = 0 #скорость правого двигателя
     cmd = [] #список всех команд, отправляемых роботу
     
-    data = recv_data()
+    data = recv_data() #получаем данные от пульта
     
-    if data:
-        cmd, crc = pickle.loads(data[0]) #распаковываем команду и значение контрольной суммы
-        crc_new = crc16.crc16xmodem(cmd) #расчитываем контрольную сумму полученных данных
+    if data: #если данные получены
+        data, crc = pickle.loads(data[0]) #распаковываем команду и значение контрольной суммы
+        crc_new = crc16.crc16xmodem(data) #расчитываем контрольную сумму полученных данных
         if crc == crc_new: #сравниваем контрольные суммы и проверяем целостность данных
-            cmd = pickle.loads(cmd) #распаковываем список команд
-            direction, power, command, servo = cmd
-            """
-            if servo[0]:
-                servo_run(0, servo[0])
-            if servo[1]:
-                servo_run(1, servo[1])
-            if servo[2]:
-                servo_run(2, servo[2])
-            if servo[3]:
-                servo_run(3, servo[3])
-            """
-
+            data = pickle.loads(data) #распаковываем список команд
+            direction, power, command, auto_mode = data
+            
+            #reply.append() #добавляем к списку, отправляемому на пульт данные
+            
             if "BOOST" in command:
                 power = 255
             else:
-                power = val_map(power, 0, 100, 0, MAX_POWER)
-    
+                power = val_map(power, 0, 100, 0, MAX_POWER) #переводим мощность от 0 до 100 в от 0 до 255
+        
     if direction == None:
         leftSpeed = 0
         rightSpeed = 0
@@ -304,14 +301,20 @@ def main():
         leftSpeed = -power
         rightSpeed = -int(power * KOOF)
         
-    motorRun(leftSpeed, rightSpeed)
+    motorRun(leftSpeed, rightSpeed) #запускаем двигатели
     
     if "BEEP" in command:
         robot.Beep()
     if "EXIT" in command:
         running = False
         print("the program has been stopped by ", USER_IP)
-    time.sleep(0.1)
+    
+    time.sleep(DELAY)
+
+first_cicle = True #проверка на то, первая ли это иттерация главного цикла
+running = True 
+auto_mode = None #переключатель режимов автономности
+reply = [] 
 
 disp = Adafruit_SSD1306.SSD1306_128_64(rst = None) #создаем обект для работы c OLED дисплеем 128х64
 disp.begin() #инициализируем дисплей
@@ -328,11 +331,14 @@ server.bind((IP, PORT)) #запускаем сервер
 print("Listening %s on port %d..." % (IP, PORT))
 server.settimeout(TIMEOUT) #указываем серверу время ожидания приема сообщения
 
-#все данные, которые должны быть выведены на экран (название и место для значения)
-all_data = [["направление", "мощность", "команды", "напряжение", "ток"], [[], [], [], [], []]] 
-old_data = None 
-first_cicle = True
-running = True
+#запуск потока, обеспечивающего вывод данных на экран
+stateThread = StateThread(robot, ina, disp) 
+stateThread.start()
+#создаем клиент для обратной связи
+client = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+#запуск потока, обеспечивающего обратную связь
+reply_thread = threading.Thread(target = send_reply)
+reply_thread.start()
 
 while running:
     try:
